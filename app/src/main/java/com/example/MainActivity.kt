@@ -74,7 +74,6 @@ import com.example.ui.screens.ComicVaultTabScreen
 import com.example.ui.screens.CreateOfflineDocDialog
 import com.example.ui.screens.LibraryTabScreen
 import com.example.ui.theme.Amber400
-import com.example.ui.theme.Cyan400
 import com.example.ui.theme.OmniDocTheme
 import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
@@ -161,6 +160,7 @@ fun OmniDocRootApp(viewModel: OmniDocViewModel) {
     val activeOnlineChapterReader by viewModel.activeOnlineChapterReader.collectAsStateWithLifecycle()
     val activeOnlineChapterPages by viewModel.activeOnlineChapterPages.collectAsStateWithLifecycle()
     val isLoadingChapterPages by viewModel.isLoadingChapterPages.collectAsStateWithLifecycle()
+    val deviceIndexState by viewModel.deviceIndexState.collectAsStateWithLifecycle()
 
     var currentTab by remember { mutableStateOf(MainNavTab.LIBRARY) }
     var showCreateDocDialog by remember { mutableStateOf(false) }
@@ -171,6 +171,15 @@ fun OmniDocRootApp(viewModel: OmniDocViewModel) {
     ) { uri ->
         if (uri != null) {
             viewModel.importExternalFile(uri)
+        }
+    }
+
+    // Native Storage Access Framework (SAF) Directory Tree Picker for Deep Device Indexing
+    val openDocumentTreeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            viewModel.onGrantStorageTreeUri(treeUri)
         }
     }
 
@@ -189,6 +198,7 @@ fun OmniDocRootApp(viewModel: OmniDocViewModel) {
             pageUrls = activeOnlineChapterPages,
             isLoadingPages = isLoadingChapterPages,
             downloadProgress = onlineDownloadProgress,
+            viewModel = viewModel,
             onSaveChapterAsOfflineCbz = {
                 viewModel.downloadOnlineChapterToCbz(series, chapter)
             },
@@ -207,6 +217,7 @@ fun OmniDocRootApp(viewModel: OmniDocViewModel) {
             initialPortal = portal,
             allPortals = viewModel.curatedComicPortals,
             downloadProgress = onlineDownloadProgress,
+            viewModel = viewModel,
             onDownloadDirectUrl = { url, filename ->
                 viewModel.downloadDirectArchiveUrlToLibrary(url, filename)
             },
@@ -370,16 +381,10 @@ fun OmniDocRootApp(viewModel: OmniDocViewModel) {
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                 )
                             }
-                            Column {
-                                Text(
-                                    text = "OmniDoc Reader",
-                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                                )
-                                Text(
-                                    text = "PDF • DOCX • XLSX • PPTX • TXT • CBZ • CBR",
-                                    style = MaterialTheme.typography.labelSmall.copy(color = Cyan400)
-                                )
-                            }
+                            Text(
+                                text = "OmniDoc Reader",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                            )
                         }
                     },
                     actions = {
@@ -486,6 +491,7 @@ fun OmniDocRootApp(viewModel: OmniDocViewModel) {
                                 selectedFormat = selectedFormat,
                                 sortOption = sortOption,
                                 onlyFavorites = onlyFavorites,
+                                deviceIndexState = deviceIndexState,
                                 onSearchQueryChange = { viewModel.setSearchQuery(it) },
                                 onSelectFormat = { viewModel.setFormatFilter(it) },
                                 onCycleSort = {
@@ -503,7 +509,10 @@ fun OmniDocRootApp(viewModel: OmniDocViewModel) {
                                 onShareDoc = { viewModel.shareDocumentOffline(it) },
                                 onDeleteDoc = { viewModel.deleteDocument(it) },
                                 onOpenDeviceFile = { openDocumentLauncher.launch(arrayOf("*/*")) },
-                                onCreateNewDoc = { showCreateDocDialog = true }
+                                onCreateNewDoc = { showCreateDocDialog = true },
+                                onScanEntireDevice = { formats -> viewModel.scanAndIndexEntireDevice(formats) },
+                                onGrantStorageFolder = { openDocumentTreeLauncher.launch(null) },
+                                onRemoveGrantedFolder = { uriStr -> viewModel.removeGrantedStorageTree(uriStr) }
                             )
                         }
                         MainNavTab.COMICS -> {

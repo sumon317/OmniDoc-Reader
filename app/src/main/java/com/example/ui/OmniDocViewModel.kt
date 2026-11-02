@@ -23,6 +23,8 @@ import com.example.data.ParsedTextDocument
 import com.example.data.ParsedXlsxWorkbook
 import com.example.data.ReadingColorMode
 import com.example.engine.ComicPortalCategory
+import com.example.engine.DeviceIndexState
+import com.example.engine.DeviceStorageIndexer
 import com.example.engine.DownloadedModelStatus
 import com.example.engine.EverythingMoeComicHubEngine
 import com.example.engine.EverythingMoePortalSource
@@ -37,6 +39,8 @@ import com.example.engine.OnlineComicSeries
 import com.example.engine.OnlineDownloadProgress
 import com.example.engine.PdfAndComicEngine
 import com.example.engine.TtsPlaybackState
+import com.example.engine.UBlockOriginEngine
+import com.example.engine.UBlockOriginState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -91,10 +95,14 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
 
     private val database = OmniDocDatabase.getInstance(application)
     private val repository = OmniDocRepository(application, database.omniDocDao())
+    private val deviceIndexer = DeviceStorageIndexer(application, database.omniDocDao())
     private val ttsController = OfflineTtsController(application)
     private val hfModelManager = HuggingFaceTtsModelManager(application)
     private val comicHubEngine = EverythingMoeComicHubEngine(application)
+    val uBlockEngine = UBlockOriginEngine(application)
 
+    val uBlockState: StateFlow<UBlockOriginState> = uBlockEngine.state
+    val deviceIndexState: StateFlow<DeviceIndexState> = deviceIndexer.state
     val ttsState: StateFlow<TtsPlaybackState> = ttsController.state
     val curatedHfModels: List<HuggingFaceTtsModelInfo> = hfModelManager.curatedMobileModels
     val hfModelStatuses: StateFlow<Map<String, DownloadedModelStatus>> = hfModelManager.modelStatuses
@@ -213,6 +221,7 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
     init {
         viewModelScope.launch {
             OfflineSampleGenerator.ensureSeeded(getApplication(), database.omniDocDao())
+            deviceIndexer.indexEntireDevice()
         }
         viewModelScope.launch {
             comicHubEngine.loadOnlineCatalog(OnlineComicFilter.TRENDING_MANGA)
@@ -268,13 +277,14 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
                     val count = PdfAndComicEngine.getPdfPageCount(file).coerceAtLeast(1)
                     val safePage = startUnit.coerceIn(0, count - 1)
                     repository.updateReadingProgress(doc.id, safePage, count)
-                    val pdfText = PdfAndComicEngine.extractPdfTextForTts(
+                    val rawPdfText = PdfAndComicEngine.extractPdfTextForTts(
                         file = file,
                         fallbackTitle = doc.title,
                         fallbackSummary = doc.summarySnippet
                     )
+                    val sanitized = uBlockEngine.auditDocumentOnOpen(doc.title, rawPdfText)
                     ttsController.prepareDocumentText(
-                        rawText = pdfText,
+                        rawText = sanitized.cleanedText,
                         rate = settings.ttsSpeechRate,
                         pitch = settings.ttsPitch
                     )
@@ -285,7 +295,30 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
                     )
                 }
                 DocFormat.DOCX -> {
-                    val parsed = OfficeOpenXmlParser.parseDocx(file)
+                    val rawParsed = OfficeOpenXmlParser.parseDocx(file)
+                    val sanitizedBlocks = rawParsed.blocks.map { block ->
+                        when (block) {
+                            is DocxBlock.Heading -> block.copy(
+                                text = uBlockEngine.sanitizeDocumentText(block.text, doc.title).cleanedText
+                            )
+                            is DocxBlock.Paragraph -> block.copy(
+                                text = uBlockEngine.sanitizeDocumentText(block.text, doc.title).cleanedText
+                            )
+                            is DocxBlock.BulletItem -> block.copy(
+                                text = uBlockEngine.sanitizeDocumentText(block.text, doc.title).cleanedText
+                            )
+                            is DocxBlock.CalloutBox -> block.copy(
+                                title = uBlockEngine.sanitizeDocumentText(block.title, doc.title).cleanedText,
+                                body = uBlockEngine.sanitizeDocumentText(block.body, doc.title).cleanedText
+                            )
+                            is DocxBlock.TableBlock -> block
+                        }
+                    }
+                    val sanitizedTts = uBlockEngine.auditDocumentOnOpen(doc.title, rawParsed.plainTextForTts)
+                    val parsed = rawParsed.copy(
+                        blocks = sanitizedBlocks,
+                        plainTextForTts = sanitizedTts.cleanedText
+                    )
                     val totalBlocks = parsed.blocks.size.coerceAtLeast(1)
                     repository.updateReadingProgress(doc.id, startUnit.coerceIn(0, totalBlocks - 1), totalBlocks)
                     ttsController.prepareDocumentText(
@@ -296,7 +329,9 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
                     _activeViewerState.value = ActiveViewerState.DocxReady(doc, parsed)
                 }
                 DocFormat.XLSX -> {
-                    val parsed = OfficeOpenXmlParser.parseXlsxOrCsv(file)
+                    val rawParsed = OfficeOpenXmlParser.parseXlsxOrCsv(file)
+                    val sanitizedTts = uBlockEngine.auditDocumentOnOpen(doc.title, rawParsed.plainTextForTts)
+                    val parsed = rawParsed.copy(plainTextForTts = sanitizedTts.cleanedText)
                     val sheetCount = parsed.sheets.size.coerceAtLeast(1)
                     repository.updateReadingProgress(doc.id, startUnit.coerceIn(0, sheetCount - 1), sheetCount)
                     ttsController.prepareDocumentText(
@@ -307,7 +342,9 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
                     _activeViewerState.value = ActiveViewerState.XlsxReady(doc, parsed)
                 }
                 DocFormat.PPTX -> {
-                    val parsed = OfficeOpenXmlParser.parsePptx(file)
+                    val rawParsed = OfficeOpenXmlParser.parsePptx(file)
+                    val sanitizedTts = uBlockEngine.auditDocumentOnOpen(doc.title, rawParsed.plainTextForTts)
+                    val parsed = rawParsed.copy(plainTextForTts = sanitizedTts.cleanedText)
                     val slideCount = parsed.slides.size.coerceAtLeast(1)
                     repository.updateReadingProgress(doc.id, startUnit.coerceIn(0, slideCount - 1), slideCount)
                     ttsController.prepareDocumentText(
@@ -318,7 +355,13 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
                     _activeViewerState.value = ActiveViewerState.PptxReady(doc, parsed)
                 }
                 DocFormat.TXT -> {
-                    val parsed = OfficeOpenXmlParser.parseTextFile(file)
+                    val rawParsed = OfficeOpenXmlParser.parseTextFile(file)
+                    val sanitizedReport = uBlockEngine.auditDocumentOnOpen(doc.title, rawParsed.content)
+                    val cleanedLines = sanitizedReport.cleanedText.lines()
+                    val parsed = rawParsed.copy(
+                        content = sanitizedReport.cleanedText,
+                        lines = cleanedLines
+                    )
                     val lineCount = parsed.lines.size.coerceAtLeast(1)
                     repository.updateReadingProgress(doc.id, startUnit.coerceIn(0, lineCount - 1), lineCount)
                     ttsController.prepareDocumentText(
@@ -329,7 +372,14 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
                     _activeViewerState.value = ActiveViewerState.TextReady(doc, parsed)
                 }
                 DocFormat.CBZ, DocFormat.CBR -> {
-                    val info = PdfAndComicEngine.inspectComicArchive(file, doc.docFormat)
+                    val rawInfo = PdfAndComicEngine.inspectComicArchive(file, doc.docFormat)
+                    val filteredEntries = rawInfo.pageEntryNames.filterNot { entry ->
+                        uBlockEngine.isComicArchiveEntryAdBanner(entry)
+                    }.ifEmpty { rawInfo.pageEntryNames }
+                    val info = rawInfo.copy(
+                        pageEntryNames = filteredEntries,
+                        pageCount = filteredEntries.size.coerceAtLeast(1)
+                    )
                     val pageCount = info.pageCount.coerceAtLeast(1)
                     val safePage = startUnit.coerceIn(0, pageCount - 1)
                     repository.updateReadingProgress(doc.id, safePage, pageCount)
@@ -884,7 +934,11 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
         _activeOnlineChapterReader.value = series to chapter
         _isLoadingChapterPages.value = true
         viewModelScope.launch {
-            val pages = comicHubEngine.fetchChapterPageUrls(chapter, dataSaver = true)
+            val rawPages = comicHubEngine.fetchChapterPageUrls(chapter, dataSaver = true)
+            val pages = uBlockEngine.filterComicPageUrls(
+                rawUrls = rawPages,
+                sourceLabel = "${series.title} Ch.${chapter.chapterNumber}"
+            )
             _activeOnlineChapterPages.value = pages
             _isLoadingChapterPages.value = false
         }
@@ -1024,6 +1078,104 @@ class OmniDocViewModel(application: Application) : AndroidViewModel(application)
                 _statusBannerMessage.value = "Could not pack images from this page"
             }
         }
+    }
+
+    // Device-Wide Storage Indexer Actions
+    fun scanAndIndexEntireDevice(
+        selectedFormats: Set<DocFormat> = DocFormat.entries.toSet()
+    ) {
+        viewModelScope.launch {
+            val result = deviceIndexer.indexEntireDevice(selectedFormats)
+            _statusBannerMessage.value = if (result.newlyAddedCount > 0) {
+                "Indexed ${result.newlyAddedCount} new file(s)! (${result.totalSupportedFound} total supported files)"
+            } else {
+                "Device index complete • ${result.totalSupportedFound} supported files verified across ${result.scannedFoldersCount} folders"
+            }
+        }
+    }
+
+    fun onGrantStorageTreeUri(treeUri: Uri) {
+        viewModelScope.launch {
+            val granted = deviceIndexer.takePersistableFolderGrant(treeUri)
+            if (granted) {
+                val result = deviceIndexer.indexEntireDevice()
+                _statusBannerMessage.value = "Indexed granted folder • ${result.newlyAddedCount} new file(s) discovered"
+            } else {
+                _statusBannerMessage.value = "Could not persist storage folder permission"
+            }
+        }
+    }
+
+    fun removeGrantedStorageTree(uriString: String) {
+        deviceIndexer.releasePersistableFolderGrant(uriString)
+        _statusBannerMessage.value = "Removed storage folder from device index"
+    }
+
+    // uBlock Origin Ad-Blocker & Reader Shield Actions
+    fun toggleUBlockGlobalPower() {
+        uBlockEngine.toggleGlobalEnabled()
+        val enabled = uBlockEngine.state.value.isEnabled
+        _statusBannerMessage.value = if (enabled) {
+            "uBlock Origin Shield Enabled across Browser & Inbuilt Readers"
+        } else {
+            "uBlock Origin Shield Paused"
+        }
+    }
+
+    fun toggleUBlockWhitelistHost(hostOrUrl: String) {
+        uBlockEngine.toggleWhitelistForHost(hostOrUrl)
+    }
+
+    fun toggleUBlockElementZapper() {
+        val next = !uBlockEngine.state.value.elementZapperModeActive
+        uBlockEngine.setElementZapperMode(next)
+        if (next) {
+            _statusBannerMessage.value = "uBO Element Zapper Active: Tap any element on the page to remove it"
+        }
+    }
+
+    fun toggleUBlockPopups() {
+        uBlockEngine.toggleBlockPopups()
+    }
+
+    fun toggleUBlockCosmeticFiltering() {
+        uBlockEngine.toggleCosmeticFiltering()
+    }
+
+    fun toggleUBlockStrictThirdParty() {
+        uBlockEngine.toggleStrictThirdPartyBlocking()
+    }
+
+    fun toggleUBlockReaderTrackerSanitizer() {
+        uBlockEngine.toggleReaderTrackerSanitizer()
+    }
+
+    fun toggleUBlockComicPromoFilter() {
+        uBlockEngine.toggleComicPromoPageFilter()
+    }
+
+    fun toggleUBlockFilterList(listId: String) {
+        uBlockEngine.toggleFilterList(listId)
+    }
+
+    fun syncUBlockFilterListsFromGitHub() {
+        viewModelScope.launch {
+            val summary = uBlockEngine.syncFilterListsFromRemote()
+            _statusBannerMessage.value = summary
+        }
+    }
+
+    fun addUBlockCustomRule(rule: String) {
+        uBlockEngine.addCustomFilterRule(rule)
+        _statusBannerMessage.value = "Added custom uBlock Origin filter: $rule"
+    }
+
+    fun removeUBlockCustomRule(rule: String) {
+        uBlockEngine.removeCustomFilterRule(rule)
+    }
+
+    fun clearUBlockLogger() {
+        uBlockEngine.clearLogs()
     }
 
     override fun onCleared() {

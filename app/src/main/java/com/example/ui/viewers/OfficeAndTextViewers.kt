@@ -91,6 +91,8 @@ import com.example.ui.components.ReadingFilterOverlay
 import com.example.ui.components.ReadingRulerOverlay
 import com.example.ui.components.TtsControlBar
 import com.example.ui.components.TtsInteractiveModalSheet
+import com.example.ui.components.UBlockOriginDashboardSheet
+import com.example.ui.components.UBlockOriginShieldPill
 import com.example.ui.components.buildHighlightedAnnotatedString
 import com.example.ui.components.countQueryMatches
 import com.example.ui.theme.Amber400
@@ -206,6 +208,7 @@ fun DocxViewerScreen(
                 showRuler = settings.showReadingRuler,
                 isTtsActive = ttsState.isPlaying || showTtsBar,
                 isSearchActive = showSearchField || inDocSearch.isNotBlank(),
+                viewModel = viewModel,
                 onBack = onBack,
                 onToggleSearch = { showSearchField = !showSearchField },
                 onToggleRuler = { viewModel.toggleReadingRuler() },
@@ -706,6 +709,7 @@ fun XlsxViewerScreen(
                 showRuler = settings.showReadingRuler,
                 isTtsActive = ttsState.isPlaying || showTtsBar,
                 isSearchActive = showSearchBar || rowFilterQuery.isNotBlank(),
+                viewModel = viewModel,
                 onBack = onBack,
                 onToggleSearch = { showSearchBar = !showSearchBar },
                 onToggleRuler = { viewModel.toggleReadingRuler() },
@@ -1192,6 +1196,7 @@ fun PptxViewerScreen(
                 showRuler = settings.showReadingRuler,
                 isTtsActive = ttsState.isPlaying || showTtsBar,
                 isSearchActive = showSearchBar || searchQuery.isNotBlank(),
+                viewModel = viewModel,
                 onBack = onBack,
                 onToggleSearch = { showSearchBar = !showSearchBar },
                 onToggleRuler = { viewModel.toggleReadingRuler() },
@@ -1705,6 +1710,7 @@ fun TextAndMarkdownViewerScreen(
                 showRuler = settings.showReadingRuler,
                 isTtsActive = ttsState.isPlaying || showTtsBar,
                 isSearchActive = showSearchBar || searchQuery.isNotBlank(),
+                viewModel = viewModel,
                 onBack = onBack,
                 onToggleSearch = { showSearchBar = !showSearchBar },
                 onToggleRuler = { viewModel.toggleReadingRuler() },
@@ -2032,6 +2038,7 @@ private fun CommonOfficeTopBar(
     showRuler: Boolean,
     isTtsActive: Boolean,
     isSearchActive: Boolean = false,
+    viewModel: OmniDocViewModel? = null,
     onBack: () -> Unit,
     onToggleSearch: () -> Unit,
     onToggleRuler: () -> Unit,
@@ -2040,6 +2047,9 @@ private fun CommonOfficeTopBar(
     onOpenBookmarks: () -> Unit,
     onOpenAccessibility: () -> Unit
 ) {
+    var showUBlockSheet by remember { mutableStateOf(false) }
+    val uboState = viewModel?.uBlockState?.collectAsStateWithLifecycle()?.value
+
     Surface(
         color = Slate900,
         tonalElevation = 4.dp,
@@ -2084,6 +2094,14 @@ private fun CommonOfficeTopBar(
                     style = MaterialTheme.typography.labelSmall.copy(color = Cyan400),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (uboState != null) {
+                UBlockOriginShieldPill(
+                    uboState = uboState,
+                    onClick = { showUBlockSheet = true },
+                    modifier = Modifier.padding(end = 2.dp)
                 )
             }
 
@@ -2144,5 +2162,28 @@ private fun CommonOfficeTopBar(
                 )
             }
         }
+    }
+
+    if (showUBlockSheet && viewModel != null && uboState != null) {
+        UBlockOriginDashboardSheet(
+            uboState = uboState,
+            currentContextTitle = "Inbuilt ${document.docFormat.label} Reader",
+            currentHostOrDocName = document.title,
+            isBrowserContext = false,
+            onToggleGlobalPower = { viewModel.toggleUBlockGlobalPower() },
+            onToggleWhitelistCurrentHost = { viewModel.toggleUBlockWhitelistHost(document.title) },
+            onToggleElementZapper = {},
+            onToggleBlockPopups = { viewModel.toggleUBlockPopups() },
+            onToggleCosmeticFiltering = { viewModel.toggleUBlockCosmeticFiltering() },
+            onToggleStrictThirdParty = { viewModel.toggleUBlockStrictThirdParty() },
+            onToggleReaderTrackerSanitizer = { viewModel.toggleUBlockReaderTrackerSanitizer() },
+            onToggleComicPromoFilter = { viewModel.toggleUBlockComicPromoFilter() },
+            onToggleFilterList = { viewModel.toggleUBlockFilterList(it) },
+            onSyncFilterListsNow = { viewModel.syncUBlockFilterListsFromGitHub() },
+            onAddCustomRule = { viewModel.addUBlockCustomRule(it) },
+            onRemoveCustomRule = { viewModel.removeUBlockCustomRule(it) },
+            onClearLogger = { viewModel.clearUBlockLogger() },
+            onDismiss = { showUBlockSheet = false }
+        )
     }
 }

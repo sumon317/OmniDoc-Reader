@@ -63,6 +63,9 @@ interface OmniDocDao {
     @Query("SELECT * FROM documents ORDER BY lastOpenedAt DESC")
     fun getAllDocuments(): Flow<List<DocumentEntity>>
 
+    @Query("SELECT * FROM documents")
+    suspend fun getAllDocumentsSnapshot(): List<DocumentEntity>
+
     @Query("SELECT * FROM documents WHERE id = :id LIMIT 1")
     suspend fun getDocumentById(id: Long): DocumentEntity?
 

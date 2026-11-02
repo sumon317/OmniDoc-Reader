@@ -90,6 +90,8 @@ import com.example.ui.components.ReadingFilterOverlay
 import com.example.ui.components.ReadingRulerOverlay
 import com.example.ui.components.TtsControlBar
 import com.example.ui.components.TtsInteractiveModalSheet
+import com.example.ui.components.UBlockOriginDashboardSheet
+import com.example.ui.components.UBlockOriginShieldPill
 import com.example.ui.components.buildHighlightedAnnotatedString
 import com.example.ui.components.countQueryMatches
 import com.example.ui.theme.Amber400
@@ -133,9 +135,11 @@ fun PdfDocumentViewerScreen(
     var showTtsStudioSheet by remember { mutableStateOf(false) }
     var showAccessibilitySheet by remember { mutableStateOf(false) }
     var showBookmarksSheet by remember { mutableStateOf(false) }
+    var showUBlockSheet by remember { mutableStateOf(false) }
 
     val ttsState by viewModel.ttsState.collectAsStateWithLifecycle()
     val hfStatuses by viewModel.hfModelStatuses.collectAsStateWithLifecycle()
+    val uboState by viewModel.uBlockState.collectAsStateWithLifecycle()
     val isCurrentPageBookmarked = bookmarks.any { it.unitIndex == currentPage }
 
     LaunchedEffect(document.localFilePath, pageCount) {
@@ -248,6 +252,12 @@ fun PdfDocumentViewerScreen(
                             style = MaterialTheme.typography.labelSmall.copy(color = Cyan400)
                         )
                     }
+
+                    UBlockOriginShieldPill(
+                        uboState = uboState,
+                        onClick = { showUBlockSheet = true },
+                        modifier = Modifier.padding(end = 2.dp)
+                    )
 
                     IconButton(
                         onClick = { showSearchBar = !showSearchBar },
@@ -669,6 +679,29 @@ fun PdfDocumentViewerScreen(
             onSynthesizeToWav = { viewModel.exportActiveDocToWavAudio() }
         )
     }
+
+    if (showUBlockSheet) {
+        UBlockOriginDashboardSheet(
+            uboState = uboState,
+            currentContextTitle = "Inbuilt PDF Reader",
+            currentHostOrDocName = document.title,
+            isBrowserContext = false,
+            onToggleGlobalPower = { viewModel.toggleUBlockGlobalPower() },
+            onToggleWhitelistCurrentHost = { viewModel.toggleUBlockWhitelistHost(document.title) },
+            onToggleElementZapper = {},
+            onToggleBlockPopups = { viewModel.toggleUBlockPopups() },
+            onToggleCosmeticFiltering = { viewModel.toggleUBlockCosmeticFiltering() },
+            onToggleStrictThirdParty = { viewModel.toggleUBlockStrictThirdParty() },
+            onToggleReaderTrackerSanitizer = { viewModel.toggleUBlockReaderTrackerSanitizer() },
+            onToggleComicPromoFilter = { viewModel.toggleUBlockComicPromoFilter() },
+            onToggleFilterList = { viewModel.toggleUBlockFilterList(it) },
+            onSyncFilterListsNow = { viewModel.syncUBlockFilterListsFromGitHub() },
+            onAddCustomRule = { viewModel.addUBlockCustomRule(it) },
+            onRemoveCustomRule = { viewModel.removeUBlockCustomRule(it) },
+            onClearLogger = { viewModel.clearUBlockLogger() },
+            onDismiss = { showUBlockSheet = false }
+        )
+    }
 }
 
 /**
@@ -698,7 +731,9 @@ fun ComicArchiveViewerScreen(
     var showComicInfoDialog by remember { mutableStateOf(false) }
     var showBookmarksSheet by remember { mutableStateOf(false) }
     var showAccessibilitySheet by remember { mutableStateOf(false) }
+    var showUBlockSheet by remember { mutableStateOf(false) }
 
+    val uboState by viewModel.uBlockState.collectAsStateWithLifecycle()
     val isBookmarked = bookmarks.any { it.unitIndex == currentPage }
 
     LaunchedEffect(
@@ -768,6 +803,12 @@ fun ComicArchiveViewerScreen(
                                 style = MaterialTheme.typography.labelSmall.copy(color = Cyan400)
                             )
                         }
+
+                        UBlockOriginShieldPill(
+                            uboState = uboState,
+                            onClick = { showUBlockSheet = true },
+                            modifier = Modifier.padding(end = 2.dp)
+                        )
 
                         IconButton(onClick = { showComicInfoDialog = true }) {
                             Icon(
@@ -1075,6 +1116,29 @@ fun ComicArchiveViewerScreen(
             onJumpToUnit = { targetPage ->
                 currentPage = targetPage.coerceIn(0, pageCount - 1)
             }
+        )
+    }
+
+    if (showUBlockSheet) {
+        UBlockOriginDashboardSheet(
+            uboState = uboState,
+            currentContextTitle = "Inbuilt ${document.docFormat.label} Comic Reader",
+            currentHostOrDocName = archiveInfo.title,
+            isBrowserContext = false,
+            onToggleGlobalPower = { viewModel.toggleUBlockGlobalPower() },
+            onToggleWhitelistCurrentHost = { viewModel.toggleUBlockWhitelistHost(archiveInfo.title) },
+            onToggleElementZapper = {},
+            onToggleBlockPopups = { viewModel.toggleUBlockPopups() },
+            onToggleCosmeticFiltering = { viewModel.toggleUBlockCosmeticFiltering() },
+            onToggleStrictThirdParty = { viewModel.toggleUBlockStrictThirdParty() },
+            onToggleReaderTrackerSanitizer = { viewModel.toggleUBlockReaderTrackerSanitizer() },
+            onToggleComicPromoFilter = { viewModel.toggleUBlockComicPromoFilter() },
+            onToggleFilterList = { viewModel.toggleUBlockFilterList(it) },
+            onSyncFilterListsNow = { viewModel.syncUBlockFilterListsFromGitHub() },
+            onAddCustomRule = { viewModel.addUBlockCustomRule(it) },
+            onRemoveCustomRule = { viewModel.removeUBlockCustomRule(it) },
+            onClearLogger = { viewModel.clearUBlockLogger() },
+            onDismiss = { showUBlockSheet = false }
         )
     }
 }

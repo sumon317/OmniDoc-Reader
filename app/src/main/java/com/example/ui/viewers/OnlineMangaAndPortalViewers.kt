@@ -94,12 +94,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.engine.EverythingMoePortalSource
 import com.example.engine.OnlineComicChapter
 import com.example.engine.OnlineComicSeries
 import com.example.engine.OnlineDownloadProgress
+import com.example.ui.OmniDocViewModel
+import com.example.ui.components.UBlockOriginDashboardSheet
+import com.example.ui.components.UBlockOriginShieldPill
 import com.example.ui.theme.Amber400
 import com.example.ui.theme.Cyan400
 import com.example.ui.theme.Emerald400
@@ -108,29 +113,6 @@ import com.example.ui.theme.Slate900
 import com.example.ui.theme.Slate950
 import kotlinx.coroutines.launch
 import org.json.JSONArray
-import java.io.ByteArrayInputStream
-
-private val BLOCKED_AD_DOMAINS = listOf(
-    "doubleclick.net",
-    "googlesyndication.com",
-    "adservice.google",
-    "popads.net",
-    "popcash.net",
-    "propellerads.com",
-    "adsterra.com",
-    "exoclick.com",
-    "juicyads.com",
-    "trafficjunky.net",
-    "hilltopads.net",
-    "clickadu.com",
-    "admaven.com",
-    "galaksion.com",
-    "a-ads.com",
-    "outbrain.com",
-    "taboola.com",
-    "zedo.com",
-    "bidvertiser.com"
-)
 
 /**
  * Full-screen In-App EverythingMoe & Online Manga / Manhwa / Comic / DDL Portal Browser
@@ -144,19 +126,30 @@ fun EverythingMoePortalBrowserScreen(
     initialPortal: EverythingMoePortalSource,
     allPortals: List<EverythingMoePortalSource>,
     downloadProgress: OnlineDownloadProgress,
+    viewModel: OmniDocViewModel,
     onDownloadDirectUrl: (url: String, suggestedFilename: String?) -> Unit,
     onPackWebImagesToCbz: (pageTitle: String, imageUrls: List<String>) -> Unit,
     onClose: () -> Unit
 ) {
+    val uboState by viewModel.uBlockState.collectAsStateWithLifecycle()
+    val uboEngine = viewModel.uBlockEngine
+
     var currentUrl by remember { mutableStateOf(initialPortal.url) }
     var urlInputText by remember { mutableStateOf(initialPortal.url) }
     var pageTitle by remember { mutableStateOf(initialPortal.name) }
     var loadProgress by remember { mutableIntStateOf(0) }
     var isLoading by remember { mutableStateOf(true) }
-    var adShieldEnabled by remember { mutableStateOf(true) }
-    var blockedAdCount by remember { mutableIntStateOf(0) }
+    var showUBlockSheet by remember { mutableStateOf(false) }
     var showUrlEditor by remember { mutableStateOf(false) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+
+    LaunchedEffect(uboState.elementZapperModeActive, uboState.isEnabled, uboState.cosmeticFilteringEnabled) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        wv.evaluateJavascript(uboEngine.buildElementZapperJs(uboState.elementZapperModeActive), null)
+        if (uboState.isEnabled) {
+            wv.evaluateJavascript(uboEngine.buildCosmeticAndScriptletPayload(currentUrl), null)
+        }
+    }
 
     BackHandler {
         val wv = webViewRef
@@ -213,35 +206,14 @@ fun EverythingMoePortalBrowserScreen(
                         }
                     },
                     actions = {
-                        // Ad-Shield Toggle with blocked count badge
-                        Surface(
-                            color = if (adShieldEnabled) Emerald400.copy(alpha = 0.18f) else Slate800,
-                            shape = RoundedCornerShape(10.dp),
+                        // uBlock Origin Shield Pill with live blocked requests badge
+                        UBlockOriginShieldPill(
+                            uboState = uboState,
+                            onClick = { showUBlockSheet = true },
                             modifier = Modifier
-                                .clickable { adShieldEnabled = !adShieldEnabled }
                                 .padding(end = 4.dp)
                                 .testTag("portal_ad_shield_toggle")
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Security,
-                                    contentDescription = "Ad Shield",
-                                    tint = if (adShieldEnabled) Emerald400 else Color.Gray,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = if (adShieldEnabled) "Shield ($blockedAdCount)" else "Off",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = if (adShieldEnabled) Emerald400 else Color.LightGray,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                )
-                            }
-                        }
+                        )
 
                         // Reader Mode CSS Enhancer (fits comic images 100% width on dark canvas)
                         IconButton(
@@ -472,6 +444,54 @@ fun EverythingMoePortalBrowserScreen(
                         }
                     }
                 }
+                // Interactive uBlock Origin Element Zapper Banner
+                AnimatedVisibility(visible = uboState.elementZapperModeActive) {
+                    Surface(
+                        color = Color(0xFF7F1D1D),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "uBO Element Zapper Active: Tap any annoying banner on page to zap it",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        webViewRef?.evaluateJavascript("(function(){ return window.__lastUboZappedSelector || ''; })();") { raw ->
+                                            val sel = raw?.trim()?.removeSurrounding("\"") ?: ""
+                                            if (sel.isNotBlank() && sel != "null") {
+                                                viewModel.addUBlockCustomRule(sel)
+                                            }
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text("Save Rule", style = MaterialTheme.typography.labelSmall.copy(color = Amber400))
+                                }
+                                Button(
+                                    onClick = { viewModel.toggleUBlockElementZapper() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Slate950),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text("Exit", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     ) { innerPadding ->
@@ -484,7 +504,7 @@ fun EverythingMoePortalBrowserScreen(
                 WebView(ctx).apply {
                     webViewRef = this
                     CookieManager.getInstance().setAcceptCookie(true)
-                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
 
                     settings.apply {
                         javaScriptEnabled = true
@@ -498,6 +518,7 @@ fun EverythingMoePortalBrowserScreen(
                         displayZoomControls = false
                         setSupportZoom(true)
                         setSupportMultipleWindows(false) // Prevents pop-under ad tabs
+                        javaScriptCanOpenWindowsAutomatically = false
                         userAgentString =
                             "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
                     }
@@ -529,25 +550,30 @@ fun EverythingMoePortalBrowserScreen(
                                 urlInputText = url
                             }
                             isLoading = true
+                            // Inject uBlock Origin scriptlets & cosmetic stylesheet early
+                            view?.evaluateJavascript(uboEngine.buildCosmeticAndScriptletPayload(url), null)
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isLoading = false
+                            // Re-apply uBlock Origin cosmetic DOM hiding & scriptlets on DOM ready
+                            view?.evaluateJavascript(uboEngine.buildCosmeticAndScriptletPayload(url), null)
+                            if (uboEngine.state.value.elementZapperModeActive) {
+                                view?.evaluateJavascript(uboEngine.buildElementZapperJs(true), null)
+                            }
                         }
 
                         override fun shouldInterceptRequest(
                             view: WebView?,
                             request: WebResourceRequest?
                         ): WebResourceResponse? {
-                            val reqUrl = request?.url?.toString()?.lowercase() ?: return null
-                            if (adShieldEnabled && BLOCKED_AD_DOMAINS.any { reqUrl.contains(it) }) {
-                                blockedAdCount++
-                                return WebResourceResponse(
-                                    "text/plain",
-                                    "utf-8",
-                                    ByteArrayInputStream(ByteArray(0))
-                                )
+                            val intercepted = uboEngine.shouldInterceptWebViewRequest(
+                                request = request,
+                                pageUrl = currentUrl
+                            )
+                            if (intercepted != null) {
+                                return intercepted
                             }
                             return super.shouldInterceptRequest(view, request)
                         }
@@ -559,14 +585,8 @@ fun EverythingMoePortalBrowserScreen(
                             val targetUri = request?.url ?: return false
                             val targetUrl = targetUri.toString()
 
-                            // Block non-http schemes (intent:// malware redirects)
-                            if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-                                return true
-                            }
-
-                            // Block known ad domains on click
-                            if (adShieldEnabled && BLOCKED_AD_DOMAINS.any { targetUrl.contains(it, ignoreCase = true) }) {
-                                blockedAdCount++
+                            // Evaluate navigation/popup against uBlock Origin rules
+                            if (uboEngine.shouldBlockNavigationOrPopup(targetUrl, currentUrl)) {
                                 return true
                             }
 
@@ -588,6 +608,44 @@ fun EverythingMoePortalBrowserScreen(
                     loadUrl(initialPortal.url)
                 }
             }
+        )
+    }
+
+    if (showUBlockSheet) {
+        UBlockOriginDashboardSheet(
+            uboState = uboState,
+            currentContextTitle = "In-App Portal Browser",
+            currentHostOrDocName = Uri.parse(currentUrl).host ?: currentUrl,
+            isBrowserContext = true,
+            onToggleGlobalPower = {
+                viewModel.toggleUBlockGlobalPower()
+                webViewRef?.reload()
+            },
+            onToggleWhitelistCurrentHost = {
+                viewModel.toggleUBlockWhitelistHost(currentUrl)
+                webViewRef?.reload()
+            },
+            onToggleElementZapper = { viewModel.toggleUBlockElementZapper() },
+            onToggleBlockPopups = { viewModel.toggleUBlockPopups() },
+            onToggleCosmeticFiltering = {
+                viewModel.toggleUBlockCosmeticFiltering()
+                webViewRef?.reload()
+            },
+            onToggleStrictThirdParty = {
+                viewModel.toggleUBlockStrictThirdParty()
+                webViewRef?.reload()
+            },
+            onToggleReaderTrackerSanitizer = { viewModel.toggleUBlockReaderTrackerSanitizer() },
+            onToggleComicPromoFilter = { viewModel.toggleUBlockComicPromoFilter() },
+            onToggleFilterList = { viewModel.toggleUBlockFilterList(it) },
+            onSyncFilterListsNow = { viewModel.syncUBlockFilterListsFromGitHub() },
+            onAddCustomRule = {
+                viewModel.addUBlockCustomRule(it)
+                webViewRef?.reload()
+            },
+            onRemoveCustomRule = { viewModel.removeUBlockCustomRule(it) },
+            onClearLogger = { viewModel.clearUBlockLogger() },
+            onDismiss = { showUBlockSheet = false }
         )
     }
 }
@@ -879,10 +937,13 @@ fun NativeOnlineChapterReaderScreen(
     pageUrls: List<String>,
     isLoadingPages: Boolean,
     downloadProgress: OnlineDownloadProgress,
+    viewModel: OmniDocViewModel,
     onSaveChapterAsOfflineCbz: () -> Unit,
     onOpenInWebPortalFallback: (String) -> Unit,
     onClose: () -> Unit
 ) {
+    val uboState by viewModel.uBlockState.collectAsStateWithLifecycle()
+    var showUBlockSheet by remember { mutableStateOf(false) }
     var isWebtoonVerticalMode by remember {
         mutableStateOf(series.contentTypeLabel == "MANHWA" || series.contentTypeLabel == "MANHUA")
     }
@@ -929,6 +990,12 @@ fun NativeOnlineChapterReaderScreen(
                         }
                     },
                     actions = {
+                        UBlockOriginShieldPill(
+                            uboState = uboState,
+                            onClick = { showUBlockSheet = true },
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+
                         // Toggle Webtoon Scroll vs Paged Mode
                         IconButton(onClick = { isWebtoonVerticalMode = !isWebtoonVerticalMode }) {
                             Icon(
@@ -1160,5 +1227,28 @@ fun NativeOnlineChapterReaderScreen(
                 }
             }
         }
+    }
+
+    if (showUBlockSheet) {
+        UBlockOriginDashboardSheet(
+            uboState = uboState,
+            currentContextTitle = "Inbuilt Online Manga Reader",
+            currentHostOrDocName = "${series.title} • Ch. ${chapter.chapterNumber}",
+            isBrowserContext = false,
+            onToggleGlobalPower = { viewModel.toggleUBlockGlobalPower() },
+            onToggleWhitelistCurrentHost = { viewModel.toggleUBlockWhitelistHost(series.webUrl) },
+            onToggleElementZapper = {},
+            onToggleBlockPopups = { viewModel.toggleUBlockPopups() },
+            onToggleCosmeticFiltering = { viewModel.toggleUBlockCosmeticFiltering() },
+            onToggleStrictThirdParty = { viewModel.toggleUBlockStrictThirdParty() },
+            onToggleReaderTrackerSanitizer = { viewModel.toggleUBlockReaderTrackerSanitizer() },
+            onToggleComicPromoFilter = { viewModel.toggleUBlockComicPromoFilter() },
+            onToggleFilterList = { viewModel.toggleUBlockFilterList(it) },
+            onSyncFilterListsNow = { viewModel.syncUBlockFilterListsFromGitHub() },
+            onAddCustomRule = { viewModel.addUBlockCustomRule(it) },
+            onRemoveCustomRule = { viewModel.removeUBlockCustomRule(it) },
+            onClearLogger = { viewModel.clearUBlockLogger() },
+            onDismiss = { showUBlockSheet = false }
+        )
     }
 }

@@ -87,6 +87,7 @@ import com.example.data.DocumentEntity
 import com.example.data.OmniDocRepository
 import com.example.data.ReadingColorMode
 import com.example.engine.ComicPortalCategory
+import com.example.engine.DeviceIndexState
 import com.example.engine.DownloadedModelStatus
 import com.example.engine.EverythingMoePortalSource
 import com.example.engine.HuggingFaceTtsModelInfo
@@ -115,6 +116,7 @@ fun LibraryTabScreen(
     selectedFormat: DocFormat?,
     sortOption: SortOption,
     onlyFavorites: Boolean,
+    deviceIndexState: DeviceIndexState,
     onSearchQueryChange: (String) -> Unit,
     onSelectFormat: (DocFormat?) -> Unit,
     onCycleSort: () -> Unit,
@@ -124,10 +126,14 @@ fun LibraryTabScreen(
     onShareDoc: (DocumentEntity) -> Unit,
     onDeleteDoc: (DocumentEntity) -> Unit,
     onOpenDeviceFile: () -> Unit,
-    onCreateNewDoc: () -> Unit
+    onCreateNewDoc: () -> Unit,
+    onScanEntireDevice: (Set<DocFormat>) -> Unit,
+    onGrantStorageFolder: () -> Unit,
+    onRemoveGrantedFolder: (String) -> Unit
 ) {
     val totalComics = allDocs.count { it.docFormat.isComic }
     val totalBytes = allDocs.sumOf { it.fileSizeBytes }
+    var showIndexerDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
@@ -143,6 +149,16 @@ fun LibraryTabScreen(
                 totalBytes = totalBytes,
                 onOpenDeviceFile = onOpenDeviceFile,
                 onCreateNewDoc = onCreateNewDoc
+            )
+        }
+
+        // Device-Wide File Indexer Card
+        item {
+            DeviceStorageIndexerCard(
+                indexState = deviceIndexState,
+                onQuickScanDevice = { onScanEntireDevice(DocFormat.entries.toSet()) },
+                onGrantFolder = onGrantStorageFolder,
+                onOpenIndexerDialog = { showIndexerDialog = true }
             )
         }
 
@@ -284,6 +300,440 @@ fun LibraryTabScreen(
 
         item { Spacer(modifier = Modifier.height(16.dp)) }
     }
+
+    if (showIndexerDialog) {
+        DeviceIndexerStudioDialog(
+            indexState = deviceIndexState,
+            onDismiss = { showIndexerDialog = false },
+            onStartScan = { formats ->
+                onScanEntireDevice(formats)
+            },
+            onGrantFolder = onGrantStorageFolder,
+            onRemoveFolder = onRemoveGrantedFolder
+        )
+    }
+}
+
+@Composable
+fun DeviceStorageIndexerCard(
+    indexState: DeviceIndexState,
+    onQuickScanDevice: () -> Unit,
+    onGrantFolder: () -> Unit,
+    onOpenIndexerDialog: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = Slate900),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, Cyan400.copy(alpha = 0.32f), RoundedCornerShape(18.dp))
+            .testTag("device_indexer_card")
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        color = Cyan400.copy(alpha = 0.16f),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Explore,
+                            contentDescription = "Device Indexer",
+                            tint = Cyan400,
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .size(20.dp)
+                        )
+                    }
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Device-Wide File Indexer",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                            Surface(
+                                color = Emerald400.copy(alpha = 0.18f),
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(
+                                    text = if (indexState.isIndexing) "SCANNING…" else "AUTO-DISCOVERY",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        color = Emerald400,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp
+                                    ),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = indexState.currentScanningLocation,
+                            style = MaterialTheme.typography.labelSmall.copy(color = Color(0xFF94A3B8)),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                TextButton(
+                    onClick = onOpenIndexerDialog,
+                    modifier = Modifier.testTag("manage_device_index_button")
+                ) {
+                    Text(
+                        text = "Configure",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = Amber400,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
+            }
+
+            if (indexState.isIndexing) {
+                Spacer(modifier = Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    color = Cyan400,
+                    trackColor = Slate800,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(50))
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Format breakdown badges
+            if (indexState.formatBreakdown.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    DocFormat.entries.forEach { fmt ->
+                        val count = indexState.formatBreakdown[fmt] ?: 0
+                        Surface(
+                            color = fmt.badgeColor.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.border(
+                                1.dp,
+                                fmt.badgeColor.copy(alpha = 0.4f),
+                                RoundedCornerShape(8.dp)
+                            )
+                        ) {
+                            Text(
+                                text = "${fmt.label}: $count",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    color = fmt.badgeColor,
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Button(
+                    onClick = onQuickScanDevice,
+                    enabled = !indexState.isIndexing,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Cyan400,
+                        contentColor = Slate950
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("scan_device_button")
+                ) {
+                    if (indexState.isIndexing) {
+                        CircularProgressIndicator(
+                            color = Slate950,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (indexState.isIndexing) "Indexing Device…" else "Index Entire Device",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onGrantFolder,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    modifier = Modifier.testTag("grant_folder_tree_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        tint = Amber400,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (indexState.persistedFolders.isEmpty()) "Add Storage Root" else "Roots (${indexState.persistedFolders.size})"
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DeviceIndexerStudioDialog(
+    indexState: DeviceIndexState,
+    onDismiss: () -> Unit,
+    onStartScan: (Set<DocFormat>) -> Unit,
+    onGrantFolder: () -> Unit,
+    onRemoveFolder: (String) -> Unit
+) {
+    var selectedFormats by remember { mutableStateOf(DocFormat.entries.toSet()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Slate900,
+        title = {
+            Column {
+                Text(
+                    text = "Device-Wide File Indexer",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Text(
+                    text = "Automatically discovers supported documents & comics across internal storage, Downloads, MediaStore, and granted folders.",
+                    style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF94A3B8))
+                )
+            }
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // Telemetry Stats Box
+                Surface(
+                    color = Slate800,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp)
+                    ) {
+                        Column {
+                            Text(
+                                text = "SCANNED",
+                                style = MaterialTheme.typography.labelSmall.copy(color = Color.Gray)
+                            )
+                            Text(
+                                text = "${indexState.scannedFilesCount} files • ${indexState.scannedFoldersCount} dirs",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "DISCOVERED",
+                                style = MaterialTheme.typography.labelSmall.copy(color = Color.Gray)
+                            )
+                            Text(
+                                text = "${indexState.totalSupportedFound} supported (+${indexState.newlyAddedCount} new)",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    color = Cyan400,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // Supported Format Check Chips
+                Text(
+                    text = "Supported File Formats to Index:",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = Amber400,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                ) {
+                    DocFormat.entries.forEach { fmt ->
+                        val isSelected = fmt in selectedFormats
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = {
+                                selectedFormats = if (isSelected && selectedFormats.size > 1) {
+                                    selectedFormats - fmt
+                                } else {
+                                    selectedFormats + fmt
+                                }
+                            },
+                            label = {
+                                Text("${fmt.label} (.${fmt.extensions.joinToString(", .")})")
+                            }
+                        )
+                    }
+                }
+
+                // Granted Storage Roots (SAF)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Granted Storage Roots (${indexState.persistedFolders.size}):",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = Cyan400,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                    TextButton(onClick = onGrantFolder) {
+                        Icon(
+                            imageVector = Icons.Default.FolderOpen,
+                            contentDescription = null,
+                            tint = Amber400,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Grant Folder", color = Amber400)
+                    }
+                }
+
+                if (indexState.persistedFolders.isEmpty()) {
+                    Text(
+                        text = "Standard public folders (Downloads, Documents, MediaStore) are indexed automatically. Tap 'Grant Folder' to authorize deep recursive indexing of any custom device folder or SD card root.",
+                        style = MaterialTheme.typography.bodySmall.copy(color = Color(0xFF94A3B8))
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        indexState.persistedFolders.forEach { grant ->
+                            Surface(
+                                color = Slate800,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Emerald400,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = grant.displayName,
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = Color.White,
+                                                fontWeight = FontWeight.SemiBold
+                                            ),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onRemoveFolder(grant.uriString) },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = "Remove Folder Grant",
+                                            tint = Color.Gray,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (indexState.recentDiscoveredNames.isNotEmpty()) {
+                    Text(
+                        text = "Recently Discovered:",
+                        style = MaterialTheme.typography.labelSmall.copy(color = Emerald400)
+                    )
+                    Text(
+                        text = indexState.recentDiscoveredNames.joinToString(" • "),
+                        style = MaterialTheme.typography.bodySmall.copy(color = Color.White),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onStartScan(selectedFormats)
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Cyan400,
+                    contentColor = Slate950
+                )
+            ) {
+                Text("Run Full Device Index", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color.Gray)
+            }
+        }
+    )
 }
 
 @Composable
