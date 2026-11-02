@@ -1,0 +1,6 @@
+{
+  "name": "OmniDoc Reader",
+  "description": "Offline all-in-one document and comic book studio for PDF, DOCX, XLSX, PPTX, TXT, CBZ, and CBR with Text-to-Speech, reading accessibility filters, and annotations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

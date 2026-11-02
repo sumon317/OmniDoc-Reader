@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Back page (Cyan accent) -->
+    <path
+        android:fillColor="#FF06B6D4"
+        android:pathData="M36,24h34c3.3,0 6,2.7 6,6v42c0,3.3 -2.7,6 -6,6H36c-3.3,0 -6,-2.7 -6,-6V30c0,-3.3 2.7,-6 6,-6z" />
+    <!-- Middle page (Warm Amber Gold) -->
+    <path
+        android:fillColor="#FFF59E0B"
+        android:pathData="M32,29h36c3.3,0 6,2.7 6,6v44c0,3.3 -2.7,6 -6,6H32c-3.3,0 -6,-2.7 -6,-6V35c0,-3.3 2.7,-6 6,-6z" />
+    <!-- Front Document Prism with folded corner & lines -->
+    <path
+        android:fillColor="#FFF8FAFC"
+        android:pathData="M38,34h26l10,10v34c0,3.3 -2.7,6 -6,6H38c-3.3,0 -6,-2.7 -6,-6V40c0,-3.3 2.7,-6 6,-6z" />
+    <!-- Folded corner -->
+    <path
+        android:fillColor="#FFCBD5E1"
+        android:pathData="M64,34v10h10z" />
+    <!-- Document / Comic content bars -->
+    <path
+        android:fillColor="#FF0F172A"
+        android:pathData="M39,50h16v4H39zM39,58h28v3.5H39zM39,65h28v3.5H39zM39,72h18v3.5H39z" />
+    <!-- Bookmark ribbon -->
+    <path
+        android:fillColor="#FFEF4444"
+        android:pathData="M43,29h7v14l-3.5,-3l-3.5,3z" />
+</vector>

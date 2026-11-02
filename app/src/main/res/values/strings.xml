@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">OmniDoc Reader</string>
+    <string name="search_documents_hint">Search PDF, DOCX, XLSX, PPTX, TXT, CBZ, CBR…</string>
+    <string name="open_file_from_device">Open File</string>
+    <string name="create_new_doc">Create Document</string>
+    <string name="tab_library">Library</string>
+    <string name="tab_comics">Comics</string>
+    <string name="tab_bookmarks">Bookmarks &amp; Notes</string>
+    <string name="tab_accessibility">Accessibility</string>
+    <string name="tts_read_aloud">Read Aloud (Offline TTS)</string>
+    <string name="reading_ruler_toggle">Reading Focus Ruler</string>
+    <string name="export_to_pdf">Export to PDF</string>
+</resources>
